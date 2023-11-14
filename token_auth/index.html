@@ -132,7 +132,8 @@
                 }
             }).then((response) => {
                 const { username } = response.data;
-
+                console.log(response.data);
+                console.log(username)
                 if (username) {
                     const mainHolder = document.getElementById("main-holder");
                     const loginHeader = document.getElementById("login-header");

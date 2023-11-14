@@ -5,12 +5,18 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const port = 3000;
 const fs = require('fs');
+var request = require("request");
 
 const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 const SESSION_KEY = 'Authorization';
+const CLIENT_ID = '${client_id}';
+const CLISENT_SECRET = '${client_secret}';
+const AUDIENCE = '${audience}';
+
+let oauthToken;
 
 class Session {
     #sessions = {}
@@ -99,39 +105,176 @@ app.get('/logout', (req, res) => {
     res.redirect('/');
 });
 
-const users = [
-    {
-        login: 'Login',
-        password: 'Password',
-        username: 'Username',
-    },
-    {
-        login: 'Login1',
-        password: 'Password1',
-        username: 'Username1',
-    }
-]
+let users = []
 
-app.post('/api/login', (req, res) => {
+const axios = require('axios');
+
+app.post('/api/login', async (req, res) => {
     const { login, password } = req.body;
+    try {
+        let userHasAccess = false;
+        let loginUser;
+        var options = {
+            method: 'GET',
+            url: 'https://dev-h3816xplrlj7v6b1.us.auth0.com/api/v2/users',
+            headers: {authorization: 'Bearer ' + oauthToken}
+          };
+          
+         await axios.request(options).then(function (response) {
+            response.data.forEach(user => {
+                if(user.email == login){
+                    console.log(login + " has access")
+                    userHasAccess = true;
+                    loginUser = user;
+                }
+            });
+          }).catch(function (error) {
+            console.error(error);
+          });
+        
+        
+       
 
-    const user = users.find((user) => {
-        if (user.login == login && user.password == password) {
-            return true;
+        if(userHasAccess){
+            const auth0Response = await axios.post('https://dev-h3816xplrlj7v6b1.us.auth0.com/oauth/token', {
+                grant_type: 'password',
+                username: login,
+                password: password,
+                client_id: CLIENT_ID,
+                client_secret: CLISENT_SECRET,
+                audience: AUDIENCE,
+            });
+     
+            const access_token  = auth0Response.data;
+    
+            console.log(access_token)
+
+            if (access_token) {
+                console.log(loginUser);
+                req.session.username = loginUser.nickname;
+                req.session.login = loginUser.email;
+
+                res.json({ token: req.sessionId });
+            } else {
+                res.status(401).send('Unauthorized');
+            }
+        } else {
+            res.status(401).send('Unauthorized');
         }
-        return false
-    });
-
-    if (user) {
-        req.session.username = user.username;
-        req.session.login = user.login;
-
-        res.json({ token: req.sessionId });
+        
+    } catch (error) {
+        console.log(error)
+        res.status(401).send('Unauthorized');
     }
-
-    res.status(401).send();
 });
+
 
 app.listen(port, () => {
     console.log(`Example app listening on port ${port}`)
 })
+
+function getAccesToken(){
+    var options = { method: 'POST',
+    url: 'https://dev-h3816xplrlj7v6b1.us.auth0.com/oauth/token',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    form:
+     { client_id: CLIENT_ID,
+       client_secret:CLISENT_SECRET,
+       audience: AUDIENCE,
+       grant_type: 'client_credentials' }
+     };
+  
+    request(options, function (error, response, body) {
+      if (error) throw new Error(error);
+  
+      const responseBody = JSON.parse(body);
+      // Display the access token
+      oauthToken = responseBody.access_token;
+      console.log(oauthToken)
+  });
+}
+
+function getTokenPeriodically() {
+    const filePath = './doc/tokenData.json';
+    const tokenData = readTokenAndTimeFromFile(filePath);
+
+    if (tokenData) {
+        if(hasDayPassed(tokenData.time)) {
+            getAccesToken();
+            setTimeout(function() {
+                saveTokenAndTimeToFile(oauthToken, Date.now(), filePath);
+              }, 2000);
+        } else {
+            oauthToken = tokenData.token;
+        }
+        console.log('Токен:', tokenData.token);
+        console.log('Час:', tokenData.time);
+    } else {
+        getAccesToken();
+        setTimeout(function() {
+            saveTokenAndTimeToFile(oauthToken, Date.now(), filePath);
+          }, 2000);
+    }
+    
+  }
+  
+  // Запускаємо оновлення токену
+  getTokenPeriodically();
+
+  function saveTokenAndTimeToFile(token, time, filePath) {
+    console.log(token)
+    const data = {
+      token: token,
+      time: time
+    };
+
+    const jsonData = JSON.stringify(data);
+  
+    try {
+      fs.writeFileSync(filePath, '', 'utf8');
+  
+      fs.writeFileSync(filePath, jsonData, { flag: 'w', encoding: 'utf8' });
+      console.log('Дані збережено у файлі:', filePath);
+    } catch (err) {
+      console.error('Помилка при записі у файл:', err);
+    }
+  }
+
+  function readTokenAndTimeFromFile(filePath) {
+    try {
+        fs.access(filePath, fs.constants.F_OK, (err) => {
+            if (err) {
+                fs.writeFile(filePath,'', (err) => {
+                if (err) {
+                    console.error('Помилка при створенні файлу:', err);
+                } else {
+                    console.log('Створено новий файл:', filePath);
+                }
+              });
+            } else {
+                console.log('Файл вже існує:', filePath);
+            }
+        });
+    
+        const fileData = fs.readFileSync(filePath);
+        const data = JSON.parse(fileData);
+        return data;
+    } catch (error) {
+        console.error('Помилка при зчитуванні файлу:', error);
+        return null;
+    }
+  }
+
+  function hasDayPassed(previousTime) {
+    const millisecondsInDay = 24 * 60 * 60 * 1000; 
+  
+    const currentTime = new Date().getTime(); 
+  
+    const timeDifference = currentTime - previousTime;
+
+    if (timeDifference >= millisecondsInDay) {
+      return true; 
+    } else {
+      return false;
+    }
+  }
