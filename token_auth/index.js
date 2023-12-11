@@ -6,7 +6,7 @@ const path = require('path');
 const port = 3000;
 const fs = require('fs');
 var request = require("request");
-
+const { auth, requiredScopes } = require('express-oauth2-jwt-bearer');
 const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -278,3 +278,44 @@ function getTokenPeriodically() {
       return false;
     }
   }
+
+
+const checkJwt = auth({
+  audience: 'https://dev-h3816xplrlj7v6b1.us.auth0.com/api/v2/',
+  issuerBaseURL: `https://dev-h3816xplrlj7v6b1.us.auth0.com/`,
+});
+
+
+app.get('/api/private-scoped', checkJwt, function(req, res) {
+  res.json({
+    message: 'Its endpoint only fot verified users'
+  });
+});
+
+
+
+app.get('/api/private-scoped-users', checkJwt, requiredScopes('read:users'), async function(req, res) {
+    var options = {
+        method: 'GET',
+        url: 'https://dev-h3816xplrlj7v6b1.us.auth0.com/api/v2/users',
+        headers: {authorization: 'Bearer ' + oauthToken}
+      };
+      
+     await axios.request(options).then(function (response) {
+        res.json({
+            users: response.data
+          });
+      }).catch(function (error) {
+        console.error(error);
+      });
+   
+  });
+
+
+  app.get('/logUser', async (req, res) => {
+  
+        return res.json({
+            message: 'You are log in with oauth'
+        })
+
+})
